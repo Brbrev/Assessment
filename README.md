@@ -20,4 +20,4 @@ The n8n cloud-native validation workflow is triggered by the provided Url as a w
 The Vision API request is then prepared, a call to OpenAI Vision API is made then the comparison and matching process is performed.
 The validation output is then formatted and written to the Google worksheet via the provided URL.
 
-Only one record can be processed at this time. After the first applicant record is processed, any of the other two applicant records can be copied to the first row and the workflow can be repeated.
+In this prototype demonstration only one record can be processed at this time. After the first applicant record is processed, any of the other two applicant records can be copied to the first row and the workflow can be repeated.
