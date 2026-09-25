@@ -1,0 +1,467 @@
+{
+  "name": "My workflow 5",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ae2a1618-84c6-4bb0-899c-b2893df05397",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1728,
+        2032
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "spreadsheetId",
+              "value": "private",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "applicationSheetName",
+              "value": "Application data",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "validationSheetName",
+              "value": "COLA Validation Data",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "imageUrlColumn",
+              "value": "Front Image url",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "openaiApiKey",
+              "value": "private",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "54b97303-997d-413d-b443-9372f421e2c5",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1472,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Workflow Configuration').first().json.spreadsheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Application Data"
+        },
+        "options": {
+          "returnFirstMatch": false
+        }
+      },
+      "id": "7ca07695-ad6e-4135-9a2d-7b5b7cda36db",
+      "name": "Read Application Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1248,
+        1856
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "RJmdxC4YDRQVgcGO",
+          "name": "Google Sheets account 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json['Front Image url'] }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 3
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "91f10ae2-7722-4e32-8fe3-2362196dd042",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1024,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract application data from root level fields\nconst applicantData = {\n  \"Applicant Name\": $input.item.json[\"Applicant Name\"],\n  \"Product Name\": $input.item.json[\"Product Name\"],\n  \"Alcohol%\": $input.item.json[\"Alcohol%\"],\n  \"Bottled By\": $input.item.json[\"Bottled By\"],\n  \"Certification\": $input.item.json[\"Certification\"],\n  \"Application ID\": $input.item.json[\"Application ID\"],\n  \"App Rec Id\": $input.item.json[\"App Rec Id\"]\n};\n\n// Vision API response is in the visionApiResponse field\nconst visionResponse = $input.item.json.visionApiResponse;\n\n// Extract label JSON from Vision API\nconst extractedText = visionResponse.choices?.[0]?.message?.content || '';\nlet labelData = {};\n\ntry {\n  const jsonMatch = extractedText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    labelData = JSON.parse(jsonMatch[0]);\n  }\n} catch (e) {\n  labelData = { raw: extractedText };\n}\n\n// Mapping between application fields and label fields\nconst fieldMapping = {\n  'Applicant Name': 'applicantName',\n  'Product Name': 'productName',\n  'Alcohol%': 'alcoholPercentage',\n  'Bottled By': 'bottledBy',\n  'Certification': 'certification'\n};\n\nconst mismatches = [];\nlet validationStatus = 'Pass';\n\n// Compare each field\nfor (const [appField, labelField] of Object.entries(fieldMapping)) {\n  const appValue = applicantData[appField];\n  const labelValue = labelData[labelField];\n\n  const normalizedAppValue = String(appValue || '').trim().toLowerCase();\n  const normalizedLabelValue = String(labelValue || '').trim().toLowerCase();\n\n  if (normalizedAppValue === 'none' || normalizedAppValue === '') {\n    if (normalizedLabelValue && normalizedLabelValue !== 'null' && normalizedLabelValue !== 'none' && normalizedLabelValue !== '') {\n      mismatches.push({\n        field: appField,\n        applicationValue: appValue || 'None',\n        labelValue: labelValue,\n        reason: 'Application shows None/empty but label has value'\n      });\n      validationStatus = 'Fail';\n    }\n  } else {\n    if (!normalizedLabelValue || normalizedLabelValue === 'null' || normalizedLabelValue === 'none') {\n      mismatches.push({\n        field: appField,\n        applicationValue: appValue,\n        labelValue: labelValue || 'Not found',\n        reason: 'Label missing value that exists in application'\n      });\n      validationStatus = 'Fail';\n    } else if (normalizedAppValue !== normalizedLabelValue) {\n      mismatches.push({\n        field: appField,\n        applicationValue: appValue,\n        labelValue: labelValue,\n        reason: 'Values do not match exactly'\n      });\n      validationStatus = 'Fail';\n    }\n  }\n}\n\n// Return final validation result\nreturn {\n  json: {\n    'Application ID': applicantData['Application ID'],\n    'App Rec Id': applicantData['App Rec Id'],\n    validationStatus,\n    mismatchCount: mismatches.length,\n    mismatchedFields: mismatches.map(m => m.field).join(', '),\n    mismatchDetails: mismatches.map(m => `${m.field}: App='${m.applicationValue}' vs Label='${m.labelValue}'`).join(' | '),\n    extractedData: labelData\n  }\n};\n"
+      },
+      "id": "f5a41990-3c3f-481a-830f-35235216a714",
+      "name": "Compare and Validate Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "Application ID",
+              "value": "={{ $json['Application ID'] }}",
+              "type": "number"
+            },
+            {
+              "id": "id-2",
+              "name": "App Rec Id",
+              "value": "={{ $json['App Rec Id'] }}",
+              "type": "number"
+            },
+            {
+              "id": "id-3",
+              "name": "Status",
+              "value": "={{ $json.validationStatus }}",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "Mismatched Fields",
+              "value": "={{ $json.mismatchedFields }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "Error Details",
+              "value": "={{ $json.mismatchDetails }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "840b8997-0afe-4df3-a4cb-174e213961c3",
+      "name": "Format Validation Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Workflow Configuration').first().json.spreadsheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "COLA Validation Data",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mismatched Fields",
+              "displayName": "Mismatched Fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Error Details",
+              "displayName": "Error Details",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "App Rec Id",
+              "displayName": "App Rec Id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Application ID",
+              "displayName": "Application ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ce834472-72b9-4ba9-89e6-7f0bbe884a53",
+      "name": "Write Validation Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        320,
+        1856
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "RJmdxC4YDRQVgcGO",
+          "name": "Google Sheets account 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Workflow Configuration').first().json.openaiApiKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "862e00d7-14e4-4df4-8310-900331c17392",
+      "name": "Call OpenAI Vision API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -576,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const imageBuffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst base64Image = imageBuffer.toString('base64');\n\n// Preserve all original application data fields\nconst originalData = $input.item.json;\n\nreturn {\n  json: {\n    ...originalData,\n    requestBody: {\n      model: 'gpt-4o',\n      messages: [{\n        role: 'user',\n        content: [\n          {\n            type: 'text',\n            text: 'You are analyzing an alcohol beverage label. Extract and return ONLY the following specific information in JSON format: {\"applicantName\": \"exact company/brand name\", \"productName\": \"exact product name\", \"alcoholPercentage\": \"exact alcohol % or ABV value\", \"bottledBy\": \"exact bottling company/location\", \"certification\": \"any certification text, or null if none visible\"}. Be precise and extract exactly what you see on the label.'\n          },\n          {\n            type: 'image_url',\n            image_url: {\n              url: `data:image/jpeg;base64,${base64Image}`\n            }\n          }\n        ]\n      }],\n      max_tokens: 1000\n    }\n  }\n};"
+      },
+      "id": "de604df7-515a-44f8-b617-92cd0058c5ec",
+      "name": "Prepare Vision API Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Get the current item's index\nconst currentIndex = $item(0).$itemIndex;\n\n// Get the application data from Prepare Vision API Request node using the same index\nconst applicationData = $('Prepare Vision API Request').all()[currentIndex].json;\n\n// Get the Vision API response from current item\nconst visionResponse = $input.item.json;\n\n// Extract the relevant application fields (excluding requestBody)\nconst { requestBody, ...relevantApplicationData } = applicationData;\n\n// Merge application data with Vision API response\nreturn {\n  json: {\n    ...relevantApplicationData,\n    visionApiResponse: visionResponse\n  }\n};"
+      },
+      "id": "1c131a13-ce7b-4a71-9ebf-254724d01d4a",
+      "name": "Merge Application Data with Vision Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "path": "private",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1712,
+        1856
+      ],
+      "id": "private",
+      "name": "Webhook",
+      "webhookId": "private
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Read Application Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Application Data": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare and Validate Fields": {
+      "main": [
+        [
+          {
+            "node": "Format Validation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Validation Result": {
+      "main": [
+        [
+          {
+            "node": "Write Validation Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Prepare Vision API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Vision API Request": {
+      "main": [
+        [
+          {
+            "node": "Call OpenAI Vision API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenAI Vision API": {
+      "main": [
+        [
+          {
+            "node": "Merge Application Data with Vision Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Application Data with Vision Response": {
+      "main": [
+        [
+          {
+            "node": "Compare and Validate Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c7461849-d7f9-453f-87b7-3c6fd669102b",
+  "meta": {
+    "instanceId": "82747e18627550d6eeb591b2cbd1d9102d3c1cc341e9702b86ae70727b5c09c9"
+  },
+  "id": "private",
+  "tags": []
+}
