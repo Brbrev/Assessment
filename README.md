@@ -16,7 +16,7 @@ Steps to run the prototype
 Brief documentation of approach, tools used, and assumptions made
 
 The AI-Vision Assisted label validation reads data items from a record and checks for a match with an uploaded image hosted on the Weebly website.
-The validation workflow is triggered by the provided Url as a webhook. The workflow then executes a workflow configuration and reads the applicant record.
+The n8n cloud-native validation workflow is triggered by the provided Url as a webhook. The workflow then executes a workflow configuration and reads the applicant record.
 The Vision API request is then prepared, a call to OpenAI Vision API is made then the comparison and matching process is performed.
 The validation output is then formatted and written to the Google worksheet via the provided URL.
 
